@@ -1,0 +1,10 @@
+{
+    "total": 500.0,
+    "categories": {
+        "Food": 100.0,
+        "Transport": 50.0,
+        "Shopping": 70.0,
+        "Groceries": 200.0,
+        "Other": 60.0
+    }
+}
