@@ -1,3 +1,6 @@
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.chart import BarChart, LineChart, Reference
 import csv
 import json
 import os
@@ -147,8 +150,132 @@ def show_summary():
     # Most expensive category
     if category_spent:
         most_expensive = max(category_spent, key=category_spent.get)
-        print(f"\n💸 Most spent category: {most_expensive} (€{category_spent[most_expensive]:.2f})")
-
+        print(f"\n Most spent category: {most_expensive} (€{category_spent[most_expensive]:.2f})")
+def generate_excel_report():
+    print("\n--- Generating Excel Report ---")
+    
+    # Load expenses
+    with open(EXPENSES_FILE, mode='r') as file:
+        reader = csv.DictReader(file)
+        expenses = list(reader)
+    
+    if not expenses:
+        print(Fore.RED + "No expenses found!")
+        return
+    
+    # Load budget
+    budget = load_budget()
+    category_budgets = budget["categories"]
+    
+    # Create workbook
+    wb = Workbook()
+    
+    # ── Sheet 1: All Expenses ──
+    ws1 = wb.active
+    ws1.title = "All Expenses"
+    
+    # Header style
+    header_fill = PatternFill(start_color="2F75B6", end_color="2F75B6", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    
+    headers = ["No.", "Date", "Category", "Description", "Amount (€)"]
+    for col, header in enumerate(headers, 1):
+        cell = ws1.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Add expenses
+    for i, row in enumerate(expenses, 2):
+        ws1.cell(row=i, column=1, value=i-1)
+        ws1.cell(row=i, column=2, value=row["date"])
+        ws1.cell(row=i, column=3, value=row["category"])
+        ws1.cell(row=i, column=4, value=row["description"])
+        ws1.cell(row=i, column=5, value=float(row["amount"]))
+    
+    # Column widths
+    ws1.column_dimensions["A"].width = 6
+    ws1.column_dimensions["B"].width = 15
+    ws1.column_dimensions["C"].width = 15
+    ws1.column_dimensions["D"].width = 30
+    ws1.column_dimensions["E"].width = 12
+    
+    # ── Sheet 2: Category Summary ──
+    ws2 = wb.create_sheet("Budget Summary")
+    
+    # Headers
+    headers2 = ["Category", "Spent (€)", "Budget (€)", "Remaining (€)", "% Used", "Status"]
+    for col, header in enumerate(headers2, 1):
+        cell = ws2.cell(row=1, column=col, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+    
+    # Calculate category spending
+    category_spent = {}
+    for row in expenses:
+        cat = row["category"]
+        category_spent[cat] = category_spent.get(cat, 0) + float(row["amount"])
+    
+    # Color fills
+    green_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+    amber_fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+    red_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+    
+    categories = ["Food", "Transport", "Shopping", "Groceries", "Other"]
+    for i, category in enumerate(categories, 2):
+        spent = category_spent.get(category, 0)
+        cat_budget = category_budgets.get(category, 0)
+        remaining = cat_budget - spent
+        percentage = (spent / cat_budget * 100) if cat_budget > 0 else 0
+        
+        if percentage >= 100:
+            status = "EXCEEDED"
+            fill = red_fill
+        elif percentage >= 75:
+            status = "WARNING"
+            fill = amber_fill
+        else:
+            status = "OK"
+            fill = green_fill
+        
+        ws2.cell(row=i, column=1, value=category)
+        ws2.cell(row=i, column=2, value=round(spent, 2))
+        ws2.cell(row=i, column=3, value=cat_budget)
+        ws2.cell(row=i, column=4, value=round(remaining, 2))
+        ws2.cell(row=i, column=5, value=round(percentage, 1))
+        status_cell = ws2.cell(row=i, column=6, value=status)
+        
+        for col in range(1, 7):
+            ws2.cell(row=i, column=col).fill = fill
+    
+    # Column widths
+    for col in ["A", "B", "C", "D", "E", "F"]:
+        ws2.column_dimensions[col].width = 15
+    
+    # ── Bar Chart: Spent vs Budget per Category ──
+    bar_chart = BarChart()
+    bar_chart.title = "Spent vs Budget by Category"
+    bar_chart.y_axis.title = "Amount (€)"
+    bar_chart.x_axis.title = "Category"
+    bar_chart.style = 10
+    bar_chart.width = 20
+    bar_chart.height = 12
+    
+    spent_data = Reference(ws2, min_col=2, min_row=1, max_row=6)
+    budget_data = Reference(ws2, min_col=3, min_row=1, max_row=6)
+    categories_ref = Reference(ws2, min_col=1, min_row=2, max_row=6)
+    
+    bar_chart.add_data(spent_data, titles_from_data=True)
+    bar_chart.add_data(budget_data, titles_from_data=True)
+    bar_chart.set_categories(categories_ref)
+    ws2.add_chart(bar_chart, "H1")
+    
+    # Save
+    report_file = "expense_report.xlsx"
+    wb.save(report_file)
+    print(Fore.GREEN + f"\n✅ Excel report generated: {report_file}")
+    print(Fore.GREEN + f"📊 Open it in Excel to see your charts!")
 def main() :
     initialize_csv()
     while True:
@@ -157,7 +284,8 @@ def main() :
         print("2. View All expenses")
         print("3. Set Budget")
         print("4. Show Summary")
-        print("5. Exit")
+        print("5. Generate Excel Report")
+        print("6. Exit!")
         choice = input("\nChoose an option: ")
 
         if choice == "1":
@@ -169,8 +297,10 @@ def main() :
         elif choice == "4":
             show_summary()
         elif choice == "5":
-            print("Goodbye!!")
-            break
+            generate_excel_report()
+        elif choice == "6":
+              print("Goodbye!!")
+              break
         else:
             print(Fore.RED + "Invalid option, try again.")
 
